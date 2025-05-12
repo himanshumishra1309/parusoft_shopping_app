@@ -14,9 +14,9 @@ class ProductVariant {
 
   factory ProductVariant.fromJson(Map<String, dynamic> json) {
     return ProductVariant(
-      color: json['color'] as String,
-      size: json['size'] as String,
-      stock: json['stock'] as int,
+      color: json['color'] ?? '',
+      size: json['size'] ?? '',
+      stock: json['stock'] ?? 0,
     );
   }
 }
@@ -34,24 +34,24 @@ class Review {
 
   factory Review.fromJson(Map<String, dynamic> json) {
     return Review(
-      user: json['user'] as String,
-      rating: json['rating'].toDouble(),
-      comment: json['comment'] as String,
+      user: json['user'] ?? '',
+      rating: (json['rating'] ?? 0).toDouble(),
+      comment: json['comment'] ?? '',
     );
   }
 }
 
 class Product {
-  final int id;
+  final dynamic id; // Can be either String or int depending on the source
   final String name;
-  final String category;
+  final String description;
   final double price;
   final double rating;
+  final String category;
+  final List<String> images;
   final int popularity;
   final String releaseDate;
   final List<ProductVariant> variants;
-  final List<String> images;
-  final String description;
   final List<Review> reviews;
 
   Product({
@@ -69,28 +69,41 @@ class Product {
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
-    return Product(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      category: json['category'] as String,
-      price: json['price'].toDouble(),
-      rating: json['rating'].toDouble(),
-      popularity: json['popularity'] as int,
-      releaseDate: json['release_date'] as String,
-      variants: (json['variants'] as List)
+    // Parse variants safely
+    List<ProductVariant> variants = [];
+    if (json['variants'] != null) {
+      variants = (json['variants'] as List)
           .map((v) => ProductVariant.fromJson(v as Map<String, dynamic>))
-          .toList(),
-      images: List<String>.from(json['images']),
-      description: json['description'] as String,
-      reviews: (json['reviews'] as List)
+          .toList();
+    }
+
+    // Parse reviews safely
+    List<Review> reviews = [];
+    if (json['reviews'] != null) {
+      reviews = (json['reviews'] as List)
           .map((r) => Review.fromJson(r as Map<String, dynamic>))
-          .toList(),
+          .toList();
+    }
+
+    return Product(
+      // Accept both string and int IDs (from API or local JSON)
+      id: json['_id'] ?? json['id'] ?? '',
+      name: json['name'] ?? 'Unknown Product',
+      category: json['category'] ?? '',
+      price: (json['price'] ?? 0).toDouble(),
+      rating: (json['rating'] ?? 0).toDouble(),
+      popularity: json['popularity'] ?? 0,
+      releaseDate: json['release_date'] ?? json['releaseDate'] ?? '',
+      variants: variants,
+      images: json['images'] is List ? List<String>.from(json['images']) : [],
+      description: json['description'] ?? '',
+      reviews: reviews,
     );
   }
 
   // Calculate average rating from the reviews
   double get averageRating {
-    if (reviews.isEmpty) return 0.0;
+    if (reviews.isEmpty) return rating; // Use the product rating if no reviews
     double sum = reviews.fold(0.0, (prev, review) => prev + review.rating);
     return sum / reviews.length;
   }
@@ -108,9 +121,14 @@ class Product {
 
 class ProductRepository {
   static Future<List<Product>> loadProducts() async {
-    final String response = await rootBundle.loadString('assets/json_files/product_catalog_sample.json');
-    final List<dynamic> jsonData = json.decode(response);
-    return jsonData.map((json) => Product.fromJson(json)).toList();
+    try {
+      final String response = await rootBundle.loadString('assets/json_files/product_catalog_sample.json');
+      final List<dynamic> jsonData = json.decode(response);
+      return jsonData.map((json) => Product.fromJson(json)).toList();
+    } catch (e) {
+      print('Error loading products from local JSON: $e');
+      return [];
+    }
   }
 
   // Helper methods for filtering
@@ -121,11 +139,17 @@ class ProductRepository {
   
   static double getMinPrice(List<Product> products) {
     if (products.isEmpty) return 0.0;
-    return products.map((p) => p.price).reduce((a, b) => a < b ? a : b);
+    return products.fold<double>(
+      double.infinity, 
+      (prev, product) => product.price < prev ? product.price : prev
+    );
   }
   
   static double getMaxPrice(List<Product> products) {
     if (products.isEmpty) return 1000.0;
-    return products.map((p) => p.price).reduce((a, b) => a > b ? a : b);
+    return products.fold<double>(
+      0.0, 
+      (prev, product) => product.price > prev ? product.price : prev
+    );
   }
 }

@@ -1,28 +1,25 @@
 import { Router } from "express";
 import {
-  addToCart,
-  updateCartItem,
-  removeFromCart,
-  getCart,
-  clearCart,
-  adjustCartItemQuantity,
-  checkProductInCart,
-} from "../controllers/cart.controller.js";
+  addProduct,
+  addMultipleProducts,
+  updateProduct,
+  deleteProduct,
+  getProductById,
+  getAllProducts
+} from "../controllers/product.controller.js";
 
 const router = Router();
 
-router.get("/", getCart);
+router.get("/", getAllProducts);
 
-router.post("/add", addToCart);
+router.get("/:id", getProductById);
 
-router.put("/update", updateCartItem);
+router.post("/", addProduct);
 
-router.delete("/item/:itemId", removeFromCart);
+router.post("/bulk", addMultipleProducts);
 
-router.delete("/clear", clearCart);
+router.put("/:id", updateProduct);
 
-router.patch("/item/:itemId/adjust", adjustCartItemQuantity);
-
-router.get("/check/:productId", checkProductInCart);
+router.delete("/:id", deleteProduct);
 
 export default router;
