@@ -65,7 +65,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/json_files/product_catalog_sample.json
     - assets/images/product-1.jpg
     - assets/images/product-2.jpg
 
