@@ -325,4 +325,45 @@ static Future<Map<String, dynamic>> checkProductInCart(String productId) async {
     return {'isInCart': false, 'quantity': 0};
   }
 }
+
+// Add these methods to your existing ProductServices class
+
+// Frontend-only simulation methods
+static Future<Map<String, dynamic>> placeOrder({
+  required List<dynamic> items,
+  required Map<String, dynamic> shippingInfo,
+  required Map<String, dynamic> paymentInfo,
+  required double total,
+}) async {
+  // Simulate network delay
+  await Future.delayed(const Duration(seconds: 1));
+  
+  // Generate a random order ID
+  final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+  
+  // Log the order for debugging
+  print('SIMULATED ORDER PLACEMENT:');
+  print('Order ID: $orderId');
+  print('Items: ${items.length}');
+  print('Total: \$${total.toStringAsFixed(2)}');
+  print('Shipping to: ${shippingInfo['name']}');
+  print('Payment method: ${paymentInfo['method']}');
+  
+  // In a real app, this would communicate with your backend
+  // Always return success in this frontend-only implementation
+  return {
+    'success': true,
+    'orderId': orderId,
+    'message': 'Order placed successfully',
+    'data': {
+      'orderDetails': {
+        'id': orderId,
+        'date': DateTime.now().toIso8601String(),
+        'items': items,
+        'total': total,
+        'status': 'Processing'
+      }
+    }
+  };
+}
 }

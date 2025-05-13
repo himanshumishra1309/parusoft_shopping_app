@@ -25,18 +25,27 @@ class Review {
   final String user;
   final double rating;
   final String comment;
+  final List<String>? images; // Add this property
 
   Review({
     required this.user,
     required this.rating,
     required this.comment,
+    this.images, // Add this parameter
   });
 
   factory Review.fromJson(Map<String, dynamic> json) {
+    // Parse images if they exist in the JSON
+    List<String>? imagesList;
+    if (json['images'] != null) {
+      imagesList = List<String>.from(json['images']);
+    }
+
     return Review(
       user: json['user'] ?? '',
       rating: (json['rating'] ?? 0).toDouble(),
       comment: json['comment'] ?? '',
+      images: imagesList, // Include images in the constructor
     );
   }
 }

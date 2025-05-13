@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:parusoft_shopping_app/views/Checkout_Page_View.dart';
 import 'package:shimmer/shimmer.dart';
 import '../services/product_services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -91,6 +92,8 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
             _cart = jsonDecode(cachedCart);
             _isLoading = false;
           });
+          // Ensure total is calculated correctly
+          _recalculateCartTotal();
         }
       }
     } catch (e) {
@@ -152,6 +155,38 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
     );
   }
 
+  // Recalculate cart total from scratch to ensure accuracy
+  void _recalculateCartTotal() {
+    if (_cart != null && _cart!['items'] is List) {
+      double newTotal = 0.0;
+      
+      for (var item in _cart!['items']) {
+        final product = item['product'];
+        final quantity = item['quantity'] ?? 0;
+        
+        // Ensure price is treated as double
+        double price = 0.0;
+        if (product != null && product['price'] != null) {
+          price = (product['price'] is int) 
+              ? (product['price'] as int).toDouble() 
+              : product['price'];
+        }
+        
+        newTotal += price * quantity;
+      }
+      
+      setState(() {
+        _cart!['totalAmount'] = newTotal;
+      });
+      
+      // Debug output to verify calculation
+      print('Recalculated total: $newTotal');
+      
+      // Update cache with correct total
+      _saveCartToCache();
+    }
+  }
+
   Future<void> _loadCartFromServer() async {
     if (mounted) {
       setState(() {
@@ -169,6 +204,9 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
           _isLoading = false;
           _isError = false;
         });
+        
+        // Ensure the total is calculated correctly
+        _recalculateCartTotal();
         
         // Update cache with fresh data
         _saveCartToCache();
@@ -225,20 +263,37 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
   }
 
   Future<void> _updateQuantity(String itemId, int quantity, {bool immediate = false}) async {
+    // Store old total for verification
+    final double oldTotal = _cart?['totalAmount'] ?? 0.0;
+    
     // Update UI immediately for responsive feel
     setState(() {
       if (_cart != null && _cart!['items'] is List) {
         final items = List.from(_cart!['items']);
         final index = items.indexWhere((item) => item['_id'] == itemId);
+        
         if (index != -1) {
-          final oldQuantity = items[index]['quantity'];
+          final oldQuantity = items[index]['quantity'] ?? 0;
           items[index]['quantity'] = quantity;
           
-          // Update total price
-          final price = items[index]['product']['price'];
-          _cart!['totalAmount'] = (_cart!['totalAmount'] ?? 0) - (price * oldQuantity) + (price * quantity);
+          // Get price as double
+          double price = 0.0;
+          if (items[index]['product'] != null && items[index]['product']['price'] != null) {
+            price = (items[index]['product']['price'] is int)
+                ? (items[index]['product']['price'] as int).toDouble()
+                : items[index]['product']['price'];
+          }
+          
+          // Calculate price difference and update total
+          double priceDifference = price * (quantity - oldQuantity);
+          _cart!['totalAmount'] = (oldTotal + priceDifference);
           
           _cart!['items'] = items;
+          
+          // Debug output
+          print('Item: $itemId, Old quantity: $oldQuantity, New quantity: $quantity');
+          print('Price: $price, Difference: $priceDifference');
+          print('Old total: $oldTotal, New total: ${_cart!['totalAmount']}');
         }
       }
     });
@@ -257,6 +312,9 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
         _sendQuantityUpdate(itemId, quantity);
       });
     }
+    
+    // Update cache with the modified cart
+    _saveCartToCache();
   }
   
   Future<void> _sendQuantityUpdate(String itemId, int quantity) async {
@@ -264,6 +322,10 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
       await ProductServices.updateCartItem(itemId, quantity);
       // Remove from pending updates once successful
       _pendingQuantityUpdates.remove(itemId);
+      
+      // Verify the total with a recalculation
+      _recalculateCartTotal();
+      
       HapticFeedback.mediumImpact();
     } catch (e) {
       _showErrorSnackbar('Could not update item: $e');
@@ -274,25 +336,47 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
   
   Future<void> _removeCartItem(String itemId) async {
     try {
-      // Update UI immediately for better UX
-      setState(() {
-        if (_cart != null && _cart!['items'] is List) {
-          final items = List.from(_cart!['items']);
-          final index = items.indexWhere((item) => item['_id'] == itemId);
+      // Find the item and its price before removal
+      double itemTotal = 0.0;
+      
+      if (_cart != null && _cart!['items'] is List) {
+        final items = List.from(_cart!['items']);
+        final index = items.indexWhere((item) => item['_id'] == itemId);
+        
+        if (index != -1) {
+          // Calculate item price to subtract from total
+          final product = items[index]['product'];
+          final quantity = items[index]['quantity'] ?? 0;
           
-          if (index != -1) {
-            // Calculate item price to subtract from total
-            final product = items[index]['product'];
-            final quantity = items[index]['quantity'];
-            final itemTotal = product['price'] * quantity;
-            
-            // Remove item and update total
-            items.removeAt(index);
-            _cart!['items'] = items;
-            _cart!['totalAmount'] = (_cart!['totalAmount'] ?? 0) - itemTotal;
+          // Ensure price is treated as double
+          double price = 0.0;
+          if (product != null && product['price'] != null) {
+            price = (product['price'] is int) 
+                ? (product['price'] as int).toDouble() 
+                : product['price'];
           }
+          
+          itemTotal = price * quantity;
+          
+          // Remove item
+          items.removeAt(index);
+          
+          // Update cart with removed item
+          setState(() {
+            _cart!['items'] = items;
+            _cart!['totalAmount'] = (_cart!['totalAmount'] ?? 0.0) - itemTotal;
+          });
+          
+          // Ensure total is not negative
+          if ((_cart!['totalAmount'] ?? 0.0) < 0) {
+            _cart!['totalAmount'] = 0.0;
+          }
+          
+          // Debug output
+          print('Removing item: $itemId, Price: $price, Quantity: $quantity');
+          print('Item total: $itemTotal, New cart total: ${_cart!['totalAmount']}');
         }
-      });
+      }
       
       // Update cache with the updated cart
       _saveCartToCache();
@@ -301,6 +385,10 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
       await ProductServices.removeFromCart(itemId);
       _showSuccessSnackbar('Item removed from cart');
       HapticFeedback.mediumImpact();
+      
+      // Verify the total one more time
+      _recalculateCartTotal();
+      
     } catch (e) {
       _showErrorSnackbar('Could not remove item: $e');
       // Reload to reset UI state
@@ -318,7 +406,7 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
       setState(() {
         if (_cart != null) {
           _cart!['items'] = [];
-          _cart!['totalAmount'] = 0;
+          _cart!['totalAmount'] = 0.0;
         }
       });
       
@@ -351,29 +439,31 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
     });
     
     try {
-      // In a real app, this would navigate to a checkout page
-      // For demo purposes, we'll just show a success message
-      await Future.delayed(const Duration(seconds: 1));
-      _showSuccessSnackbar('Order placed successfully!');
+      // Ensure total is accurate before checkout
+      _recalculateCartTotal();
       
-      // Clear cart locally first for instant feedback
-      setState(() {
-        if (_cart != null) {
-          _cart!['items'] = [];
-          _cart!['totalAmount'] = 0;
-        }
-      });
+      // Short delay for better UX
+      await Future.delayed(const Duration(milliseconds: 300));
       
-      // Then clear on server
-      await ProductServices.clearCart();
-      
-      // Update cache with empty cart
-      _saveCartToCache();
-      
-      HapticFeedback.heavyImpact();
+      // Extract cart data for checkout
+      if (_cart != null && _cart!['items'] is List && _cart!['items'].isNotEmpty) {
+        // Navigate to checkout page
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CheckoutPage(cart: _cart!),
+          ),
+        ).then((result) {
+          // Refresh cart when returning from checkout flow if order was successful
+          if (result == 'success') {
+            _loadCartFromServer();
+          }
+        });
+      } else {
+        throw Exception('Cart is empty');
+      }
     } catch (e) {
       _showErrorSnackbar('Error processing checkout: $e');
-      _loadCartFromServer(); // Reload actual state
     } finally {
       setState(() {
         _isProcessing = false;
@@ -792,6 +882,7 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
+                                // Display individual item price × quantity
                                 Text(
                                   '\$${(product['price'] * quantity).toStringAsFixed(2)}',
                                   style: GoogleFonts.poppins(
@@ -871,6 +962,7 @@ class _CartViewState extends State<CartView> with SingleTickerProviderStateMixin
   }
   
   Widget _buildCheckoutSection() {
+    // Ensure totalAmount is a double and not null
     final double totalAmount = _cart!['totalAmount'] ?? 0.0;
     
     return Container(
