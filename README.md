@@ -151,6 +151,13 @@ brew install android-platform-tools
 
 ---
 
+## Credentials
+
+- Email: user1@gmail.com
+- Password: 12345678
+
+---
+
 ## 📤 Submission Info
 
 - Report uploaded to Google Drive
