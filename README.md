@@ -143,9 +143,8 @@ brew install android-platform-tools
 
 - ✅ Product Catalog with Filters, Search, Sort
 - ✅ Product Details with Variants
-- ✅ Persistent Cart with Hive
-- ✅ Checkout Flow with Promo Code
-- ✅ Riverpod State Management
+- ✅ Persistent Cart
+- ✅ Checkout Flow
 - ✅ Clean Architecture
 - ✅ Responsive UI
 - ✅ Unit and Widget Testing
