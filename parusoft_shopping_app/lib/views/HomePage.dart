@@ -52,33 +52,44 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   Timer? _searchDebounce;
   
   // Animation controllers
+  late TextEditingController _searchController;
   late AnimationController _filterAnimationController;
   late Animation<double> _filterAnimation;
 
   @override
-  void initState() {
-    super.initState();
-    // Initialize safe values for price ranges
-    _currentPriceRange = RangeValues(_minPrice, _maxPrice);
-    _priceRange = RangeValues(_minPrice, _maxPrice);
-    
-    _loadProducts(isFirstLoad: true);
-    _loadCartItems();
-    
-    // Initialize animations
-    _filterAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    
-    _filterAnimation = CurvedAnimation(
-      parent: _filterAnimationController,
-      curve: Curves.easeInOut,
-    );
-  }
+void initState() {
+  super.initState(); // Keep only one call to super.initState()
+  _searchController = TextEditingController(); // Initialize _searchController
+
+   // Add this listener to ensure text field and state stay in sync
+  _searchController.addListener(() {
+    if (_searchController.text != _searchQuery) {
+      _handleSearch(_searchController.text);
+    }
+  });
+  
+  // Initialize safe values for price ranges
+  _currentPriceRange = RangeValues(_minPrice, _maxPrice);
+  _priceRange = RangeValues(_minPrice, _maxPrice);
+  
+  _loadProducts(isFirstLoad: true);
+  _loadCartItems();
+  
+  // Initialize animations
+  _filterAnimationController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+  
+  _filterAnimation = CurvedAnimation(
+    parent: _filterAnimationController,
+    curve: Curves.easeInOut,
+  );
+}
 
   @override
   void dispose() {
+  _searchController.dispose();
     _searchDebounce?.cancel();
     _filterAnimationController.dispose();
     super.dispose();
@@ -343,102 +354,121 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
   }
 
-  // Function to handle both initial load and search
   Future<void> _loadProducts({bool isFirstLoad = false, bool isSearch = false}) async {
+  if (!mounted) return;
+  
+  try {
+    // Set loading state
+    setState(() {
+      _isLoading = true;
+      
+      // Always reset to page 1 for searches and first loads
+      if (isFirstLoad || isSearch) {
+        _currentPage = 1;
+      }
+    });
+
+    
+    // Create a map of all parameters for better logging
+    final requestParams = {
+      'category': _selectedCategory == 'All' ? null : _selectedCategory,
+      'page': _currentPage,
+      'limit': _pageLimit,
+      'minPrice': _minPrice != _priceRange.start ? _priceRange.start : null,
+      'maxPrice': _maxPrice != _priceRange.end ? _priceRange.end : null,
+      'minRating': _minRating > 0 ? _minRating : null,
+      'sortBy': _getSortByParameter(),
+      'sortOrder': _getSortOrderParameter(),
+      'search': _searchQuery.isNotEmpty ? _searchQuery : null,
+    };
+
+    
+    print("🔍 Executing search with query: '${_searchQuery.isNotEmpty ? _searchQuery : "empty"}'");
+    
+    // Print consistent debug info with search highlighted
+    print("🌐 API Request Parameters:");
+    requestParams.forEach((key, value) {
+      if (key == 'search' && value != null) {
+        print("  ⭐️ $key: '$value'");
+      } else {
+        print("  $key: $value");
+      }
+    });
+    
+    // Make the API call with consistent parameters
+    final productsData = await ProductServices.getAllProducts(
+      page: _currentPage,
+      limit: _pageLimit,
+      sortBy: _getSortByParameter(),
+      sortOrder: _getSortOrderParameter(),
+      category: _selectedCategory == 'All' ? null : _selectedCategory,
+      minPrice: _minPrice != _priceRange.start ? _priceRange.start : null,
+      maxPrice: _maxPrice != _priceRange.end ? _priceRange.end : null,
+      minRating: _minRating > 0 ? _minRating : null,
+      search: _searchQuery.isNotEmpty ? _searchQuery : null, // Always pass search if available
+    );
+    print("🔍 API returned ${(productsData['products'] as List?)?.length ?? 0} products for query: '$_searchQuery'");
+    
     if (!mounted) return;
     
-    try {
-      if (isFirstLoad || isSearch) {
-        setState(() {
-          _isLoading = true;
-          if (!isSearch) {
-            _currentPage = 1; // Reset pagination on filter change but not on search
+    // Debug logs for response
+    print("📥 API Response received with ${(productsData['products'] as List? ?? []).length} products");
+    
+    // Process the response
+    final List<dynamic> productsJson = productsData['products'] ?? [];
+    
+    // Parse pagination data
+    final pagination = productsData['pagination'];
+    if (pagination != null) {
+      _totalPages = pagination['totalPages'] ?? 1;
+      print("📄 Total pages: $_totalPages, Current page: $_currentPage");
+    }
+    
+    // Parse products
+    final List<Product> loadedProducts = productsJson
+        .where((json) => json != null)
+        .map<Product>((json) {
+          try {
+            return Product.fromJson(json);
+          } catch (e) {
+            print("⚠️ Error parsing product: $e");
+            // Skip invalid products
+            return Product(
+              id: 'error',
+              name: 'Error loading product',
+              description: '',
+              price: 0,
+              rating: 0,
+              category: 'Error',
+              images: [],
+              popularity: 0,
+              releaseDate: '',
+              variants: [],
+              reviews: [],
+            );
           }
-          if (isSearch) {
-            _isSearching = true;
-          }
-        });
-      }
+        })
+        .where((product) => product.id != 'error')
+        .toList();
+    
+    if (!mounted) return;
+    
+    setState(() {
+      // Replace products instead of adding to them
+      _products = loadedProducts;
+      _isLoading = false;
+      _isSearching = false;
       
-      print("Fetching products with: category=${_selectedCategory == 'All' ? null : _selectedCategory}, " +
-            "page=$_currentPage, limit=$_pageLimit, " +
-            "price=${_priceRange.start}-${_priceRange.end}, " +
-            "rating=$_minRating, " +
-            "search=${isSearch ? _searchQuery : 'null'}");
-      
-      final productsData = await ProductServices.getAllProducts(
-        page: _currentPage,
-        limit: _pageLimit,
-        sortBy: _getSortByParameter(),
-        sortOrder: _getSortOrderParameter(),
-        category: _selectedCategory == 'All' ? null : _selectedCategory,
-        minPrice: _minPrice != _priceRange.start ? _priceRange.start : null,
-        maxPrice: _maxPrice != _priceRange.end ? _priceRange.end : null,
-        minRating: _minRating > 0 ? _minRating : null,
-        search: _searchQuery.isNotEmpty ? _searchQuery : null,
-      );
-      
-      if (!mounted) return;
-      
-      // Debug logs
-      print("API Response received: ${productsData.toString().substring(0, min(100, productsData.toString().length))}...");
-      
-      // Process the response
-      final List<dynamic> productsJson = productsData['products'] ?? [];
-      print("Number of products received: ${productsJson.length}");
-      
-      // Parse pagination data
-      final pagination = productsData['pagination'];
-      if (pagination != null) {
-        _totalPages = pagination['totalPages'] ?? 1;
-        print("Total pages: $_totalPages, Current page: $_currentPage");
-      }
-      
-      final List<Product> loadedProducts = productsJson
-          .where((json) => json != null)
-          .map<Product>((json) {
-            try {
-              return Product.fromJson(json);
-            } catch (e) {
-              print("Error parsing product: $e");
-              // Skip invalid products
-              return Product(
-                id: 'error',
-                name: 'Error loading product',
-                description: '',
-                price: 0,
-                rating: 0,
-                category: 'Error',
-                images: [],
-                popularity: 0,
-                releaseDate: '',
-                variants: [],
-                reviews: [],
-              );
-            }
-          })
-          .where((product) => product.id != 'error')
-          .toList();
-      
-      if (!mounted) return;
-      
-      setState(() {
-        // Replace products instead of adding to them (no infinite scroll)
-        _products = loadedProducts;
-        _isLoading = false;
-        _isSearching = false;
-        
-        // Extract unique categories on first load
-        if (isFirstLoad) {
-          final Set<String> categorySet = {
-            'All',
-            ..._products.map((product) => product.category).toSet()
-          };
-          _categories = categorySet.toList();
-        }
+      // Extract unique categories on first load
+      if (isFirstLoad) {
+        final Set<String> categorySet = {
+          'All',
+          ..._products.map((product) => product.category).toSet()
+        };
+        _categories = categorySet.toList();
         
         // Set min and max price from all products on first load
-        if (_products.isNotEmpty && isFirstLoad) {
+        if (_products.isNotEmpty) {
           double minFound = _products.fold(double.infinity, 
             (prev, product) => product.price < prev ? product.price : prev);
           _minPrice = minFound == double.infinity ? 0 : minFound;
@@ -451,37 +481,38 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           _priceRange = RangeValues(_minPrice, _maxPrice);
           _currentPriceRange = RangeValues(_minPrice, _maxPrice);
         }
-      });
-    } catch (e) {
-      print("Error loading products: $e");
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _isSearching = false;
-          // Only clear products on first load error
-          if (isFirstLoad) {
-            _products = [];
-          }
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading products: $e'),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.red,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            margin: const EdgeInsets.all(10),
-            action: SnackBarAction(
-              label: 'RETRY',
-              textColor: Colors.white,
-              onPressed: () => _loadProducts(isFirstLoad: isFirstLoad, isSearch: isSearch),
-            ),
-          ),
-        );
       }
+      
+      // Display search result info
+      if (isSearch) {
+        print("🔍 Search results for '$_searchQuery': ${_products.length} products found");
+      }
+    });
+  } catch (e) {
+    print("❌ Error loading products: $e");
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _isSearching = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading products: $e'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.all(10),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => _loadProducts(isFirstLoad: isFirstLoad, isSearch: isSearch),
+          ),
+        ),
+      );
     }
   }
-
+}
   Future<void> _refreshProducts() async {
     setState(() {
       _currentPage = 1;
@@ -515,10 +546,20 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     return 'desc';
   }
   
-  // Get filtered products from the loaded data
-  List<Product> get filteredProducts {
+  // Add this getter method to filter products locally if server doesn't do it
+List<Product> get filteredProducts {
+  if (_searchQuery.isEmpty) {
     return _products;
   }
+  
+  // Add local filtering
+  final searchLower = _searchQuery.toLowerCase();
+  return _products.where((product) {
+    return product.name.toLowerCase().contains(searchLower) ||
+           product.description.toLowerCase().contains(searchLower) ||
+           product.category.toLowerCase().contains(searchLower);
+  }).toList();
+}
 
   int get cartItemCount {
     return _cartItems.values.fold(0, (prev, qty) => prev + qty);
@@ -914,31 +955,40 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       }
     );
   }
-
-  // Update the _handleSearch method to search from the database
-  void _handleSearch(String query) {
-    // Cancel any previous debounce timer
-    _searchDebounce?.cancel();
-    
-    // Set up a new timer
-    _searchDebounce = Timer(const Duration(milliseconds: 500), () {
-      if (query.isNotEmpty) {
-        setState(() {
-          _searchQuery = query;
-          _currentPage = 1; // Reset to first page when searching
-        });
-        _loadProducts(isSearch: true);
-      } else if (_searchQuery.isNotEmpty) {
-        // If search is cleared, reset to normal view
-        setState(() {
-          _searchQuery = '';
-          _currentPage = 1;
-        });
-        _loadProducts();
-      }
-    });
+// Replace your _handleSearch method with this implementation
+void _handleSearch(String query) {
+  // Cancel any previous debounce timer
+  _searchDebounce?.cancel();
+  
+  // Update the controller text to match the query
+  if (_searchController.text != query) {
+    _searchController.text = query;
   }
+  
+  // Set up a new timer
+  _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+    print("🔍 Search triggered with query: '$query'");
+    
+    // First set searching state
+    setState(() {
+      _searchQuery = query;
+      _currentPage = 1; // Always reset to first page when search changes
+      _isSearching = true; // Show loading indicator
+    });
+    
+    // Then load products with the search parameter
+    _loadProducts(isSearch: true);
+  });
+}
 
+// Add this method to ensure your search state is consistent
+void _resetSearch() {
+  setState(() {
+    _searchQuery = '';
+    _searchController.text = '';
+    _isSearching = false;
+  });
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1094,54 +1144,64 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                   ],
                 ),
                 child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search products...',
-                    hintStyle: GoogleFonts.poppins(
-                      color: Colors.grey[400],
-                      fontWeight: FontWeight.w400,
-                    ),
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      color: Theme.of(context).primaryColor,
-                    ),
-                    suffixIcon: _isSearching 
-                      ? Container(
-                          width: 50,
-                          alignment: Alignment.center,
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Theme.of(context).primaryColor,
-                              ),
-                            ),
-                          ),
-                        )
-                      : IconButton(
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).primaryColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.tune,
-                              color: Theme.of(context).primaryColor,
-                              size: 18,
-                            ),
-                          ),
-                          onPressed: _openFilters,
-                        ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+  controller: _searchController,
+  decoration: InputDecoration(
+    hintText: 'Search products...',
+    hintStyle: GoogleFonts.poppins(
+      color: Colors.grey[400],
+      fontWeight: FontWeight.w400,
+    ),
+    prefixIcon: Icon(
+      Icons.search_rounded,
+      color: Theme.of(context).primaryColor,
+    ),
+    suffixIcon: _searchQuery.isNotEmpty
+      ? IconButton(
+          icon: const Icon(Icons.clear),
+          onPressed: () {
+            _searchController.clear();
+            _handleSearch('');
+          },
+        )
+      : (_isSearching 
+          ? Container(
+              width: 50,
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Theme.of(context).primaryColor,
                   ),
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w500,
-                  ),
-                  onChanged: _handleSearch,
                 ),
+              ),
+            )
+          : IconButton(
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.tune,
+                  color: Theme.of(context).primaryColor,
+                  size: 18,
+                ),
+              ),
+              onPressed: _openFilters,
+            )
+      ),
+    border: InputBorder.none,
+    contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+  ),
+  style: GoogleFonts.poppins(
+    fontWeight: FontWeight.w500,
+  ),
+  onChanged: _handleSearch,
+)
               ),
             ),
             
@@ -1526,6 +1586,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: () {
+              _resetSearch();
               setState(() {
                 _searchQuery = '';
                 _selectedCategory = 'All';
